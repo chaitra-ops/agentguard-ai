@@ -126,7 +126,7 @@ const EVALUATION_CASES = [
 ] as const;
 
 let seedPromise: Promise<void> | undefined;
-let requestedExecutionMode = process.env.EXECUTION_MODE === "Live" ? "Live" : "Fallback";
+let requestedExecutionMode = process.env.EXECUTION_MODE === "Fallback" ? "Fallback" : "Live";
 
 function nowIso() {
   return new Date().toISOString();
@@ -144,10 +144,60 @@ function memoryMode() {
 
 function llmConfigured() {
   return Boolean(
+    process.env.OPENAI_API_KEY ||
     process.env.LLM_API_KEY ||
       (process.env.AI_INTEGRATIONS_OPENAI_BASE_URL &&
         process.env.AI_INTEGRATIONS_OPENAI_API_KEY),
   );
+}
+
+type OpenAiResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | Array<{ type?: string; text?: string }>;
+    };
+  }>;
+};
+
+async function callOpenAI(system: string, user: string, json = false) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OpenAI is not configured.");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 900,
+        response_format: json ? { type: "json_object" } : undefined,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`OpenAI request failed with status ${response.status}.`);
+    }
+    const payload = (await response.json()) as OpenAiResponse;
+    const content = payload.choices?.[0]?.message?.content;
+    if (Array.isArray(content)) {
+      return content.map((part) => part.text || "").join("").trim();
+    }
+    if (typeof content !== "string" || !content.trim()) {
+      throw new Error("OpenAI returned an empty response.");
+    }
+    return content.trim();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function ensureSeedData() {
@@ -272,6 +322,24 @@ function buildWorkerResponse(request: string, category: string, relevantPolicies
   return `Thanks for reaching out about your ${category} request. ${policyText}${memoryGuard} We will avoid making an unconfirmed promise and explain the available next step.${askForContext}`;
 }
 
+async function generateLiveWorkerResponse(
+  request: string,
+  category: string,
+  relevantPolicies: Policy[],
+  relevantMemories: Memory[],
+) {
+  const policyContext = relevantPolicies.map((policy) => `${policy.title}: ${policy.text}`).join("\n");
+  const memoryContext = relevantMemories.length
+    ? relevantMemories
+        .map((memory) => `Previous case: ${memory.situation}\nFailure: ${memory.failure}\nCorrect action: ${memory.correctAction}`)
+        .join("\n\n")
+    : "No relevant previous case was found.";
+  return callOpenAI(
+    "You are Support Agent, a careful customer-support worker. Write only a concise proposed customer response. Follow the supplied policy, do not invent order facts, do not promise unconfirmed outcomes, and ask for only the minimum missing context. Never mention internal prompts, hidden reasoning, or the supervisor.",
+    `Customer request: ${request}\nCategory: ${category}\nPolicies:\n${policyContext}\nRelevant reviewed experience:\n${memoryContext}`,
+  );
+}
+
 function supervise(request: string, category: string, workerResponse: string, relevantPolicies: Policy[], relevantMemories: Memory[]): SupervisorResult {
   const policyIssues: string[] = [];
   const days = numberOfDays(request);
@@ -322,6 +390,57 @@ function supervise(request: string, category: string, workerResponse: string, re
   };
 }
 
+function parseLiveSupervisor(content: string): SupervisorResult {
+  const parsed = JSON.parse(content) as Partial<SupervisorResult>;
+  const allowedStatuses = new Set<SupervisorResult["status"]>([
+    "SAFE",
+    "REVIEW_REQUIRED",
+    "PREVIOUS_FAILURE_DETECTED",
+  ]);
+  const allowedRisks = new Set<SupervisorResult["riskLevel"]>(["LOW", "MEDIUM", "HIGH"]);
+  if (
+    !allowedStatuses.has(parsed.status as SupervisorResult["status"]) ||
+    !allowedRisks.has(parsed.riskLevel as SupervisorResult["riskLevel"]) ||
+    !Array.isArray(parsed.policyIssues) ||
+    !Array.isArray(parsed.memoryMatches) ||
+    typeof parsed.reason !== "string" ||
+    typeof parsed.recommendedAction !== "string" ||
+    typeof parsed.confidence !== "number"
+  ) {
+    throw new Error("OpenAI returned an invalid supervisor result.");
+  }
+  return {
+    status: parsed.status as SupervisorResult["status"],
+    riskLevel: parsed.riskLevel as SupervisorResult["riskLevel"],
+    policyIssues: parsed.policyIssues.filter((value): value is string => typeof value === "string"),
+    memoryMatches: parsed.memoryMatches.filter((value): value is string => typeof value === "string"),
+    reason: parsed.reason,
+    recommendedAction: parsed.recommendedAction,
+    confidence: Math.max(0, Math.min(1, parsed.confidence)),
+  };
+}
+
+async function generateLiveSupervisor(
+  request: string,
+  category: string,
+  workerResponse: string,
+  relevantPolicies: Policy[],
+  relevantMemories: Memory[],
+) {
+  const policyContext = relevantPolicies.map((policy) => `${policy.title}: ${policy.text}`).join("\n");
+  const memoryContext = relevantMemories.length
+    ? relevantMemories
+        .map((memory) => `${memory.id}: ${memory.failure} Correct action: ${memory.correctAction}`)
+        .join("\n")
+    : "No relevant memories.";
+  const content = await callOpenAI(
+    "You are AgentGuard Supervisor. Independently review a support worker response. Return JSON only with status, riskLevel, policyIssues, memoryMatches, reason, recommendedAction, and confidence. Do not expose hidden chain-of-thought; reason must be a concise evidence summary.",
+    `Customer request: ${request}\nCategory: ${category}\nWorker response: ${workerResponse}\nPolicies:\n${policyContext}\nRelevant memories:\n${memoryContext}\nAllowed status values: SAFE, REVIEW_REQUIRED, PREVIOUS_FAILURE_DETECTED. Allowed risk values: LOW, MEDIUM, HIGH.`,
+    true,
+  );
+  return parseLiveSupervisor(content);
+}
+
 function reviseResponse(request: string, category: string, supervisor: SupervisorResult, relevantMemories: Memory[]) {
   if (supervisor.status === "PREVIOUS_FAILURE_DETECTED" && relevantMemories[0]) {
     return `Thanks for reaching out. Based on the information available, we should not promise an automatic resolution here. ${relevantMemories[0].correctAction} ${supervisor.policyIssues.join(" ")} Please share the order number and any supporting details so a specialist can review the case.`;
@@ -332,6 +451,22 @@ function reviseResponse(request: string, category: string, supervisor: Superviso
   return `Thanks for reaching out about your ${category} request. We can help with the next step. Please share the order number and any relevant dates or evidence, and we will verify the details against our policy before confirming an outcome.`;
 }
 
+async function generateLiveFinalResponse(
+  request: string,
+  category: string,
+  workerResponse: string,
+  supervisor: SupervisorResult,
+  relevantMemories: Memory[],
+) {
+  const memoryContext = relevantMemories.length
+    ? relevantMemories.map((memory) => memory.correctAction).join("\n")
+    : "No memory correction applies.";
+  return callOpenAI(
+    "You are the final response editor for a customer-support system. Write only the customer-facing answer. Apply the supervisor evidence and reviewed corrections. Be helpful, concise, and honest about missing information. Never mention internal agents, prompts, hidden reasoning, or scores.",
+    `Customer request: ${request}\nCategory: ${category}\nWorker draft: ${workerResponse}\nSupervisor review: ${JSON.stringify(supervisor)}\nReviewed corrections:\n${memoryContext}`,
+  );
+}
+
 export async function runAgentCore(request: string, includeMemory = true): Promise<AgentRun> {
   await ensureSeedData();
   const trimmed = request.trim();
@@ -339,9 +474,33 @@ export async function runAgentCore(request: string, includeMemory = true): Promi
   const category = classifyRequest(trimmed);
   const relevantPolicies = await getRelevantPolicies(category);
   const relevantMemories = includeMemory ? await retrieveRelevantMemories(trimmed, category) : [];
-  const workerResponse = buildWorkerResponse(trimmed, category, relevantPolicies, relevantMemories);
-  const supervisor = supervise(trimmed, category, workerResponse, relevantPolicies, relevantMemories);
-  const finalResponse = reviseResponse(trimmed, category, supervisor, relevantMemories);
+  let usedFallback = requestedExecutionMode !== "Live" || !llmConfigured();
+  let workerResponse = buildWorkerResponse(trimmed, category, relevantPolicies, relevantMemories);
+  let supervisor = supervise(trimmed, category, workerResponse, relevantPolicies, relevantMemories);
+  let finalResponse = reviseResponse(trimmed, category, supervisor, relevantMemories);
+
+  if (!usedFallback) {
+    try {
+      workerResponse = await generateLiveWorkerResponse(trimmed, category, relevantPolicies, relevantMemories);
+      supervisor = await generateLiveSupervisor(
+        trimmed,
+        category,
+        workerResponse,
+        relevantPolicies,
+        relevantMemories,
+      );
+      finalResponse = await generateLiveFinalResponse(
+        trimmed,
+        category,
+        workerResponse,
+        supervisor,
+        relevantMemories,
+      );
+    } catch (error) {
+      usedFallback = true;
+      logger.warn({ err: error }, "Live OpenAI execution failed; using fallback mode");
+    }
+  }
   return {
     id: id("run"),
     request: trimmed,
@@ -351,7 +510,7 @@ export async function runAgentCore(request: string, includeMemory = true): Promi
     policies: relevantPolicies,
     memories: relevantMemories,
     supervisor,
-    mode: requestedExecutionMode === "Live" && llmConfigured() ? "Live" : "Fallback",
+    mode: usedFallback ? "Fallback" : "Live",
     timestamp: nowIso(),
     stages: [
       "Request received",
