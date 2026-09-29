@@ -1,0 +1,19 @@
+kind = "design-system"
+previewPath = "/agentguard-design-system/"
+title = "AgentGuard Design System"
+description = "A focused visual system for AI support supervision: operational, evidence-led, and calm under review."
+version = "1.0.0"
+id = "artifacts/agentguard-design-system"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/agentguard-design-system/" ]
+localPort = 26185
+
+[services.development]
+run = "pnpm --filter @workspace/agentguard-design-system run dev"
+
+[services.env]
+PORT = "26185"
+BASE_PATH = "/agentguard-design-system/"
