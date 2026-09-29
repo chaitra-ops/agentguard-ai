@@ -10,6 +10,20 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: agent
+    description: Worker and supervisor execution
+  - name: feedback
+    description: Human review and learning feedback
+  - name: memory
+    description: Long-term experience memory
+  - name: dashboard
+    description: Product metrics and activity
+  - name: policy
+    description: Company support policy
+  - name: evaluation
+    description: Support scenario evaluation
+  - name: settings
+    description: Runtime settings
 paths:
   /healthz:
     get:
@@ -24,6 +38,202 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /dashboard/metrics:
+    get:
+      operationId: getDashboardMetrics
+      tags: [dashboard]
+      summary: Get dashboard metrics
+      responses:
+        "200":
+          description: Current metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardMetrics"
+  /activity:
+    get:
+      operationId: getActivity
+      tags: [dashboard]
+      summary: Get recent activity
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+  /policies:
+    get:
+      operationId: getPolicies
+      tags: [policy]
+      summary: List active support policies
+      responses:
+        "200":
+          description: Active policies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Policy"
+  /memory:
+    get:
+      operationId: getMemories
+      tags: [memory]
+      summary: Search experience memories
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching memories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Memory"
+  /memory/{id}:
+    get:
+      operationId: getMemory
+      tags: [memory]
+      summary: Get a memory by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Memory details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+        "404":
+          description: Memory not found
+  /alerts:
+    get:
+      operationId: getAlerts
+      tags: [dashboard]
+      summary: List supervisor alerts
+      responses:
+        "200":
+          description: Supervisor alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alert"
+  /agent/run:
+    post:
+      operationId: runAgent
+      tags: [agent]
+      summary: Run the worker and supervisor loop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentRunInput"
+      responses:
+        "200":
+          description: Completed agent run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRun"
+        "400":
+          description: Invalid customer request
+  /feedback:
+    post:
+      operationId: saveFeedback
+      tags: [feedback]
+      summary: Approve or correct an interaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackInput"
+      responses:
+        "200":
+          description: Saved feedback
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feedback"
+        "404":
+          description: Interaction not found
+  /evaluation/run:
+    post:
+      operationId: runEvaluation
+      tags: [evaluation]
+      summary: Run the seeded evaluation set
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvaluationInput"
+      responses:
+        "200":
+          description: Evaluation results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationResult"
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get runtime settings
+      responses:
+        "200":
+          description: Runtime settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update runtime settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +243,173 @@ components:
           type: string
       required:
         - status
+    DashboardMetrics:
+      type: object
+      required:
+        - totalInteractions
+        - supervisorReviews
+        - safeResponses
+        - reviewRequired
+        - previousFailureDetections
+        - humanCorrections
+        - memoriesStored
+        - repeatedMistakesPrevented
+      properties:
+        totalInteractions: { type: integer }
+        supervisorReviews: { type: integer }
+        safeResponses: { type: integer }
+        reviewRequired: { type: integer }
+        previousFailureDetections: { type: integer }
+        humanCorrections: { type: integer }
+        memoriesStored: { type: integer }
+        repeatedMistakesPrevented: { type: integer }
+    ActivityItem:
+      type: object
+      required: [id, type, title, detail, timestamp]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        title: { type: string }
+        detail: { type: string }
+        timestamp: { type: string }
+    Policy:
+      type: object
+      required: [id, category, title, text, active]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        title: { type: string }
+        text: { type: string }
+        active: { type: boolean }
+    Memory:
+      type: object
+      required: [id, domain, category, situation, customerRequest, agentResponse, failure, humanCorrection, correctAction, outcome, severity, timestamp, retrievalCount]
+      properties:
+        id: { type: string }
+        domain: { type: string }
+        category: { type: string }
+        situation: { type: string }
+        customerRequest: { type: string }
+        agentResponse: { type: string }
+        failure: { type: string }
+        humanCorrection: { type: string }
+        correctAction: { type: string }
+        outcome: { type: string }
+        severity: { type: string }
+        timestamp: { type: string }
+        retrievalCount: { type: integer }
+    Alert:
+      type: object
+      required: [id, timestamp, customerRequest, workerResponse, status, riskLevel, reason, relatedMemories, finalOutcome]
+      properties:
+        id: { type: string }
+        timestamp: { type: string }
+        customerRequest: { type: string }
+        workerResponse: { type: string }
+        status: { type: string }
+        riskLevel: { type: string }
+        reason: { type: string }
+        relatedMemories:
+          type: array
+          items: { type: string }
+        finalOutcome: { type: string }
+    SupervisorResult:
+      type: object
+      required: [status, riskLevel, policyIssues, memoryMatches, reason, recommendedAction, confidence]
+      properties:
+        status: { type: string }
+        riskLevel: { type: string }
+        policyIssues:
+          type: array
+          items: { type: string }
+        memoryMatches:
+          type: array
+          items: { type: string }
+        reason: { type: string }
+        recommendedAction: { type: string }
+        confidence: { type: number }
+    AgentRunInput:
+      type: object
+      required: [request]
+      properties:
+        request: { type: string, minLength: 1 }
+    AgentRun:
+      type: object
+      required: [id, request, category, workerResponse, finalResponse, policies, memories, supervisor, mode, timestamp, stages]
+      properties:
+        id: { type: string }
+        request: { type: string }
+        category: { type: string }
+        workerResponse: { type: string }
+        finalResponse: { type: string }
+        policies:
+          type: array
+          items: { $ref: "#/components/schemas/Policy" }
+        memories:
+          type: array
+          items: { $ref: "#/components/schemas/Memory" }
+        supervisor:
+          $ref: "#/components/schemas/SupervisorResult"
+        mode: { type: string }
+        timestamp: { type: string }
+        stages:
+          type: array
+          items: { type: string }
+    FeedbackInput:
+      type: object
+      required: [interactionId, decision]
+      properties:
+        interactionId: { type: string }
+        decision: { type: string }
+        whatWasWrong: { type: string }
+        whatShouldHaveHappened: { type: string }
+        correctResponse: { type: string }
+    Feedback:
+      type: object
+      required: [id, interactionId, decision, memoryCreated, timestamp]
+      properties:
+        id: { type: string }
+        interactionId: { type: string }
+        decision: { type: string }
+        memoryCreated: { type: boolean }
+        timestamp: { type: string }
+    EvaluationInput:
+      type: object
+      properties:
+        includeMemory: { type: boolean }
+    EvaluationResult:
+      type: object
+      required: [id, timestamp, totalCases, safeCases, reviewRequiredCases, policyIssues, memoryMatches, humanCorrections, repeatedFailureDetections, cases]
+      properties:
+        id: { type: string }
+        timestamp: { type: string }
+        totalCases: { type: integer }
+        safeCases: { type: integer }
+        reviewRequiredCases: { type: integer }
+        policyIssues: { type: integer }
+        memoryMatches: { type: integer }
+        humanCorrections: { type: integer }
+        repeatedFailureDetections: { type: integer }
+        cases:
+          type: array
+          items:
+            type: object
+            required: [category, request, status, riskLevel]
+            properties:
+              category: { type: string }
+              request: { type: string }
+              status: { type: string }
+              riskLevel: { type: string }
+    Settings:
+      type: object
+      required: [executionMode, memoryMode, llmConfigured, hindsightConfigured]
+      properties:
+        executionMode: { type: string }
+        memoryMode: { type: string }
+        llmConfigured: { type: boolean }
+        hindsightConfigured: { type: boolean }
+    SettingsUpdate:
+      type: object
+      properties:
+        executionMode: { type: string }
 

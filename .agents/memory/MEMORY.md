@@ -1,0 +1,1 @@
+- [Generated client compiler libs](generated-client-compiler-libs.md) — Orval's fetch client needs DOM iterable types in the shared API client compiler config.

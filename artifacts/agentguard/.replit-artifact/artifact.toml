@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "AgentGuard"
+description = "A memory-powered AI agent supervision platform for customer support teams. Run a support agent, inspect policy and memory retrieval, review supervisor decisions, save human corrections, and measure prevention over time."
+version = "1.0.0"
+id = "artifacts/agentguard"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19039
+
+[services.development]
+run = "pnpm --filter @workspace/agentguard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/agentguard", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/agentguard/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19039"
+BASE_PATH = "/"

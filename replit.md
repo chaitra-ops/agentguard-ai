@@ -1,6 +1,6 @@
-# [Project name]
+# AgentGuard
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+AgentGuard supervises customer-support AI responses with policy checks, long-term experience memory, and human feedback.
 
 ## Run & Operate
 
@@ -19,26 +19,36 @@ _Replace the heading above with the project's name, and this line with one sente
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
+- Frontend: React + Vite + Tailwind CSS + TanStack Query + Wouter
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/agentguard` — dashboard, run flow, memory explorer, alerts, learning effect, evaluation, and settings
+- `artifacts/api-server/src/services/agentguard.ts` — worker/supervisor orchestration, policy retrieval, local memory ranking, feedback learning, metrics
+- `artifacts/api-server/src/routes/agentguard.ts` — AgentGuard API routes
+- `lib/db/src/schema/agentguard.ts` — persistent PostgreSQL tables
+- `lib/api-spec/openapi.yaml` — source-of-truth API contract
+- `artifacts/agentguard/src/index.css` — visual tokens and application theme
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The primary acceptance path is persisted PostgreSQL data: interactions, policies, memories, feedback, and activity survive service restarts.
+- Worker, supervisor, and memory retrieval are separate service-level steps even in fallback mode, so a live provider can be added without changing the product surface.
+- Fallback mode is explicit in settings and every run result; it never claims deterministic output is live LLM output.
+- Memory retrieval uses contextual token overlap plus category weighting locally, and only stores curated seed experiences or explicit human corrections.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+AgentGuard provides a control-room dashboard for running arbitrary customer-support requests through a worker agent, support policy layer, contextual experience memory, independent supervisor review, final revision, and human feedback. It includes searchable memory, supervisor alerts, learning-effect metrics, evaluation scenarios, and runtime settings.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+No project-specific preferences recorded.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The app's web build requires workflow-provided `PORT` and `BASE_PATH`; use the managed web workflow instead of calling the Vite build directly without those variables.
+- The API currently runs in Local Fallback mode because managed AI integration credentials are not available in this workspace.
 
 ## Pointers
 
